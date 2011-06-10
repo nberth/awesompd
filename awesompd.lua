@@ -283,10 +283,12 @@ end
 --                              nil)
 --          end
 --end
-   
+
 function awesompd:add_jamendo_top()
    return function ()
-      top_list = "curl -A 'Mozilla/4.0' -fsm 5 \"http://api.jamendo.com/get2/id+name+url+stream+album_name+album_url+album_id+artist_id+artist_name/track/jsonpretty/track_album+album_artist/?n=100&order=ratingweek_desc\""
+      top_list = "curl -A 'Mozilla/4.0' -fsm 5 \"http://api.jamendo.com/get2/"..
+		"id+name+url+stream+album_name+album_url+album_id+artist_id+artist_name"..
+		"/track/jsonpretty/track_album+album_artist/?n=100&order=ratingweek_desc\""
       bus = io.popen(top_list)
       r = bus:read("*all")
       parse_table = {}
@@ -298,7 +300,8 @@ function awesompd:add_jamendo_top()
                                                               end)
       self.jamendo_list = {}
       for i = 1,table.getn(parse_table) do
-         track_link = "http://stream32.jamendo.com/stream/" .. parse_table[i].id .."/mp31/"
+         local track_link = "\"http://api.jamendo.com/get2/stream/track/"..
+	    "redirect/?streamencoding=ogg2&id=" .. parse_table[i].id .. "\""
          self:command("add " .. track_link)
          self.jamendo_list[track_link] = parse_table[i].artist .. " - " .. parse_table[i].track
       end
