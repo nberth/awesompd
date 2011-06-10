@@ -505,7 +505,7 @@ function awesompd:notify_state(state_changed)
 end
 
 function awesompd:wrap_output(text)
-   return '<span font="' .. self.font .. '">| ' .. text .. ' |</span>'
+   return '<span font="' .. self.font .. '"> ' .. text .. ' </span>'
 end
 
 function awesompd.split (s,t)
