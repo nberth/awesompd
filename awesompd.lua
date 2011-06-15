@@ -65,6 +65,8 @@ function awesompd:create()
    instance.status_text = "Stopped"
    instance.to_notify = false
    instance.connected = true
+   instance.jamendo_list = {}
+
 --   instance.promptbox = {}
 --   for s = 1, screen.count() do
 --      instance.promptbox[s] = awful.widget.prompt({ layout = awful.widget.layout.horizontal.leftright })      
@@ -102,6 +104,7 @@ function awesompd:run()
 --   self:update_state()
    self:check_playlists()
    self.load_icons(self.path_to_icons)
+   self:retrieve_cache()
    self.update_widget_timer = timer({ timeout = 1 })
    self.update_widget_timer:add_signal("timeout", function () self:update_widget() end)
    self.update_widget_timer:start()
@@ -236,6 +239,7 @@ function awesompd:command_replace_playlist(name)
 	  end
 end
 
+-- TODO: make usable prompt
 function awesompd:command_echo_prompt()
    return function()
 	     self:run_prompt("Sample text: ",function(s)
@@ -250,29 +254,32 @@ end
 
 function awesompd:command_show_menu()
    return function()
-	     self:remove_hint()
-	     if self.recreate_menu then
-		local new_menu = {}
-		if self.main_menu ~= nil then
-		   self.main_menu:hide()
-		end
-		if self.connected then
-		   self:check_list()
-		   self:check_playlists()
-		   table.insert(new_menu, { "Playback", self:get_playback_menu() })
-		   table.insert(new_menu, { "Options",  self:get_options_menu() })
-		   table.insert(new_menu, { "List", self:get_list_menu() })
-		   table.insert(new_menu, { "Playlists", self:get_playlists_menu() })
-                   table.insert(new_menu, { "Jamendo Top 100", self:add_jamendo_top() })
-		end
-		table.insert(new_menu, { "Servers", self:get_servers_menu() })
-		self.main_menu = awful.menu({ items = new_menu,
-					      width = 300
-					   })
-		self.recreate_menu = false
-	     end
-	     self.main_menu:toggle()
-	  end
+      self:remove_hint() 
+      if self.recreate_menu then 
+         local new_menu = {}
+         if self.main_menu ~= nil then
+	    self.main_menu:hide() 
+	 end 
+         if self.connected then
+            self:check_list()
+	    self:check_playlists()
+            table.insert(new_menu, { "Playback", self:get_playback_menu() })
+            table.insert(new_menu, { "Options", self:get_options_menu() })
+            table.insert(new_menu, { "List", self:get_list_menu() })
+            table.insert(new_menu, { "Playlists", self:get_playlists_menu() })
+            table.insert(new_menu, { "Jamendo Top 100", {
+                               { "MP3", self:add_jamendo_top("32","mp31") }, 
+                               { "Ogg Vorbis", self:add_jamendo_top("101","ogg2") },
+                         }}) 
+         end
+         table.insert(new_menu, { "Servers", self:get_servers_menu() }) 
+         self.main_menu = awful.menu({ items = new_menu, 
+					width = 300
+				     })
+         self.recreate_menu = false
+      end 
+      self.main_menu:toggle() 
+   end 
 end
 
 --function awesompd:try_run_inter()
@@ -283,8 +290,7 @@ end
 --                              nil)
 --          end
 --end
-
-function awesompd:add_jamendo_top()
+function awesompd:add_jamendo_top(prefix,format)
    return function ()
       top_list = "curl -A 'Mozilla/4.0' -fsm 5 \"http://api.jamendo.com/get2/"..
 		"id+name+url+stream+album_name+album_url+album_id+artist_id+artist_name"..
@@ -298,15 +304,15 @@ function awesompd:add_jamendo_top()
                                                                                 track = (_track or ""),
                                                                                 artist = (_artist or "")})
                                                               end)
-      self.jamendo_list = {}
       for i = 1,table.getn(parse_table) do
-         local track_link = "\"http://api.jamendo.com/get2/stream/track/"..
-	    "redirect/?streamencoding=ogg2&id=" .. parse_table[i].id .. "\""
+         local track_link = "\"http://api.jamendo.com/get2/stream/track/".."redirect/?streamencoding="..format.."&id="..parse_table[i].id.."\""
+         -- local track_link = "http://stream"..prefix..".jamendo.com/stream/" .. parse_table[i].id .."/".. format .."/"
          self:command("add " .. track_link)
-         self.jamendo_list[track_link] = parse_table[i].artist .. " - " .. parse_table[i].track
+         self.jamendo_list[parse_table[i].id] = parse_table[i].artist .. " - " .. parse_table[i].track
       end
       self.recreate_menu = true
       self.recreate_list = true
+      self:save_cache()
    end
 end
 
@@ -347,7 +353,7 @@ function awesompd:get_list_menu()
 	 for i = start_num, end_num do
             print(self.list_array[i])
             if (string.find(self.list_array[i],"jamendo.com")) then
-               table.insert(new_menu, { self.jamendo_list[(self.list_array[i])],
+               table.insert(new_menu, { self.jamendo_list[awesompd.get_id_from_link(self.list_array[i])],
                                         self:command_play_specific(i),
                                         self.current_number == i and 
                                            (self.status == "Playing" and self.ICONS.PLAY or self.ICONS.PAUSE)
@@ -511,6 +517,31 @@ function awesompd:wrap_output(text)
    return '<span font="' .. self.font .. '"> ' .. text .. ' </span>'
 end
 
+function awesompd:retrieve_cache()
+   self.filename = awful.util.getdir ("cache").."/jamendo_cache"
+   local bus = io.open(self.filename)
+   if bus then
+      for l in bus:lines() do
+         local _, _, id, track = string.find(l,"(%d+)-(.+)")
+         self.jamendo_list[id] = track
+      end
+   end
+end
+
+function awesompd:save_cache()
+   local bus = io.open(self.filename, "w")
+   for id,name in pairs(self.jamendo_list) do
+      bus:write(id.."-"..name.."\n")
+   end
+   bus:flush()
+   bus:close()
+end
+
+function awesompd.get_id_from_link(link)
+   local _, _, id = string.find(link,"stream/(%d+)")
+   return id
+end
+
 function awesompd.split (s,t)
    local l = {n=0}
    local f = function (s)
@@ -612,7 +643,7 @@ function awesompd:update_track()
 	 local new_track = awesompd.protect_string(info_ar[1])
 	 if new_track ~= self.unique_text then
             if (string.find(new_track,"jamendo.com")) then
-               self.text = self.jamendo_list[new_track]
+               self.text = self.jamendo_list[awesompd.get_id_from_link(new_track)]
             else
                self.text = new_track
             end
