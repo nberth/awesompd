@@ -1,12 +1,15 @@
 ---------------------------------------------------------------------------
--- @author Alexander Yakushev &lt;yakushev.alex@gmail.com&gt;
--- @copyright 2010 Alexander Yakushev
+-- @author Alexander Yakushev &lt;yakushev.alex@gmail.com&gt-- @copyright 2010 Alexander Yakushev
 -- @release v0.5b
 ---------------------------------------------------------------------------
 
 require('utf8')
 local naughty = naughty
 local awful = awful
+
+-- Debug stuff:
+-- local function dbg (...) return nil end
+local function dbg (...) print (...) end
 
 awesompd = {}
 
@@ -86,6 +89,7 @@ function awesompd:create()
    instance.output_size = 30
    instance.update_interval = 10
    instance.path_to_icons = ""
+   instance.filename = awful.util.getdir ("cache").."/jamendo_cache"
 
 -- Widget configuration
    instance.widget:add_signal("mouse::enter", function(c)
@@ -268,19 +272,19 @@ function awesompd:command_show_menu()
             table.insert(new_menu, { "List", self:get_list_menu() })
             table.insert(new_menu, { "Playlists", self:get_playlists_menu() })
             table.insert(new_menu, { "Jamendo Top 100", {
-                               { "MP3", self:add_jamendo_top("32","mp31", 100) },
-                               { "Ogg Vorbis", self:add_jamendo_top("101","ogg2", 500) },
+			       { "MP3", self:add_jamendo_top("mp31", 100) },
+                               { "Ogg Vorbis", self:add_jamendo_top("ogg2", 500) },
                          }})
             table.insert(new_menu, { "Jamendo Weekly by tag",
 			    self:run_prompt("Tag:",
-					    function (t)
-					       self:add_jamendo_weekly_by_tag("101","ogg2", 10, t) ()
+					    function (tag)
+					       self:add_jamendo_weekly_by_tag("ogg2", 10, tag) ()
 					    end)
 			 })
             table.insert(new_menu, { "Jamendo by artist",
 			    self:run_prompt("Artist:",
-					    function (t)
-					       self:add_jamendo_by_artist_name("101","ogg2", t) ()
+					    function (tag)
+					       self:add_jamendo_by_artist_name("ogg2", tag) ()
 					    end)
 			 })
          end
@@ -302,13 +306,35 @@ end
 --                              nil)
 --          end
 --end
-function awesompd:add_jamendo(prefix,format,req)
-   return
+
+function awesompd:add_tracks_from_jamendo(parse_table,format)
+   if (table.getn(parse_table) > 0) then
+      local trygetlink = 
+         assert(io.popen("echo $(curl -w %{redirect_url} " .. 
+                         "'http://api.jamendo.com/get2/stream/track/redirect/" .. 
+                         "?streamencoding="..format.."&id="..parse_table[1].id.."')"),'r'):read("*lines")
+
+      local _, _, prefix = string.find(trygetlink,"stream(%d+)\.jamendo\.com")
+      for i = 1,table.getn(parse_table) do
+	 -- NB: Let's try the hardcoded links for now.
+	 -- 
+	 -- NB: Also, the quotes are highly recommended around the arguments to
+	 -- `io.popen'.
+	 -- 
+         -- local track_link = "\"http://api.jamendo.com/get2/stream/track/redirect/?streamencoding="..format.."&id="..parse_table[i].id.."\""
+         local track_link = "\"http://stream"..prefix..".jamendo.com/stream/" .. parse_table[i].id .."/".. format .."/\""
+         self:command("add " .. track_link)
+         self.jamendo_list[parse_table[i].id] = parse_table[i].artist .. " - " .. parse_table[i].track
+      end
+   end
+end
+
+function awesompd:add_jamendo(format,req) return
    function ()
       top_list = "curl -A 'Mozilla/4.0' -fsm 5 \"http://api.jamendo.com/get2/"..
 	 "id+name+url+stream+album_name+album_url+album_id+artist_id+artist_name"..
 	 "/track/jsonpretty/track_album+album_artist/?"..req.."\""
-      print (top_list)
+      dbg (top_list)
       bus = io.popen(top_list)
       r = bus:read("*all")
       parse_table = {}
@@ -318,25 +344,19 @@ function awesompd:add_jamendo(prefix,format,req)
                                                                                 track = (_track or ""),
                                                                                 artist = (_artist or "")})
                                                               end)
-      for i = 1,table.getn(parse_table) do
-         local track_link = "\"http://api.jamendo.com/get2/stream/track/"..
-	    "redirect/?streamencoding="..format.."&id="..parse_table[i].id.."\""
-         -- local track_link = "http://stream"..prefix..".jamendo.com/stream/" .. parse_table[i].id .."/".. format .."/"
-         self:command("add " .. track_link)
-         self.jamendo_list[parse_table[i].id] = parse_table[i].artist .. " - " .. parse_table[i].track
-      end
+      self:add_tracks_from_jamendo(parse_table,format)
       self.recreate_menu = true
       self.recreate_list = true
       self:save_cache()
    end
 end
 
-function awesompd:add_jamendo_top(prefix,format,n)
-   return self:add_jamendo(prefix, format, "n="..n.."&order=ratingweek_desc")
+function awesompd:add_jamendo_top(format,n)
+   return self:add_jamendo(format, "n="..n.."&order=ratingweek_desc")
 end
 
-function awesompd:add_jamendo_weekly_by_tag(prefix,format,n,tag)
-   return self:add_jamendo(prefix, format, "n="..n.."&order=ratingweek_desc&tag_idstr="..tag)
+function awesompd:add_jamendo_weekly_by_tag(format,n,tag)
+   return self:add_jamendo(format, "n="..n.."&order=ratingweek_desc&tag_idstr="..tag)
 end
 
 local function url_encode (str)
@@ -351,8 +371,8 @@ local function url_encode (str)
    return str
 end
 
-function awesompd:add_jamendo_by_artist_name(prefix,format,name)
-   return self:add_jamendo(prefix, format, "artist_name="..url_encode(name))
+function awesompd:add_jamendo_by_artist_name(format,name)
+   return self:add_jamendo(format, "artist_name="..url_encode(name))
 end
 
 -- Returns the playback menu. Menu contains of:
@@ -390,20 +410,23 @@ function awesompd:get_list_menu()
 	 local start_num = (self.current_number - 15 > 0) and self.current_number - 15 or 1
 	 local end_num = (self.current_number + 15 < total_count ) and self.current_number + 15 or total_count
 	 for i = start_num, end_num do
-            print(self.list_array[i])
-            if (string.find(self.list_array[i],"jamendo.com")) then
-               table.insert(new_menu, { self.jamendo_list[awesompd.get_id_from_link(self.list_array[i])],
-                                        self:command_play_specific(i),
-                                        self.current_number == i and
-                                           (self.status == "Playing" and self.ICONS.PLAY or self.ICONS.PAUSE)
-                                        or nil} )
-            else
+            dbg (self.list_array[i])
+	    -- NB: I comment this 'cause I have some nil entry problems in the
+	    -- generated menu:
+	    -- 
+            -- if (string.find(self.list_array[i],"jamendo.com")) then
+            --    table.insert(new_menu, { self.jamendo_list[awesompd.get_id_from_link(self.list_array[i])],
+            --                             self:command_play_specific(i),
+            --                             self.current_number == i and
+            --                                (self.status == "Playing" and self.ICONS.PLAY or self.ICONS.PAUSE)
+            --                             or nil} )
+            -- else
                table.insert(new_menu, { awesompd.protect_string(self.list_array[i]),
                                         self:command_play_specific(i),
                                         self.current_number == i and
                                            (self.status == "Playing" and self.ICONS.PLAY or self.ICONS.PAUSE)
                                         or nil} )
-            end
+            -- end
 	 end
       end
       self.recreate_list = false
@@ -557,7 +580,6 @@ function awesompd:wrap_output(text)
 end
 
 function awesompd:retrieve_cache()
-   self.filename = awful.util.getdir ("cache").."/jamendo_cache"
    local bus = io.open(self.filename)
    if bus then
       for l in bus:lines() do
