@@ -8,8 +8,8 @@ local naughty = naughty
 local awful = awful
 
 -- Debug stuff:
--- local function dbg (...) return nil end
-local function dbg (...) print (...) end
+local function dbg (...) return nil end
+-- local function dbg (...) print (...) end
 
 awesompd = {}
 
@@ -541,7 +541,7 @@ end
 function awesompd:add_hint(hint_title, hint_text)
    self:remove_hint()
    self.notification = naughty.notify({ title      =  hint_title
-					, text       = hint_text
+					, text       = awesompd.protect_string(hint_text)
 					, timeout    = 5
 					, position   = "top_right"
 				     })
@@ -576,7 +576,8 @@ function awesompd:notify_state(state_changed)
 end
 
 function awesompd:wrap_output(text)
-   return '<span font="' .. self.font .. '"> ' .. text .. ' </span>'
+   return '<span font="' .. self.font .. '"> ' .. 
+      awesompd.protect_string (text) .. ' </span>'
 end
 
 function awesompd:retrieve_cache()
@@ -628,9 +629,15 @@ function awesompd.find_pattern(text, pattern, start)
    return utf8sub(text, string.find(text, pattern, start))
 end
 
+-- NB: If there may be escaped characters in `text' already, then we need to use
+-- a different algorithm here (some sort of `pcdata' library instead of the
+-- `utf8' one directly) so that we do not give malformed strings to the
+-- widget. However, it is much simpler to scroll unescaped strings here, and
+-- protect them upon update of the widget.
 function awesompd:scroll_text(text)
    local text = text
    local result = text
+
    if self.output_size < utf8len(text) then
       text = text .. " - "
       if self.scroll_pos + self.output_size - 1 > utf8len(text) then
@@ -701,14 +708,17 @@ function awesompd:update_track()
 	    self.recreate_list = true
 	 end
       else
-	 local new_track = awesompd.protect_string(info_ar[1])
+	 -- delay character escaping until widget update.
+	 local new_track = -- awesompd.protect_string(
+	    info_ar[1]-- )
 	 if new_track ~= self.unique_text then
             if (string.find(new_track,"jamendo.com")) then
                self.text = self.jamendo_list[awesompd.get_id_from_link(new_track)]
             else
                self.text = new_track
             end
-            self.unique_text = new_track
+            self.unique_text = new_track --<- NB: what does this mean? could it
+					 --be `self.text' instead?
 	    self.to_notify = true
 	    self.recreate_menu = true
 	    self.recreate_playback = true
